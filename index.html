@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>Document</title>
+
+    <link rel="stylesheet" href="https://kendo.cdn.telerik.com/2020.1.114/styles/kendo.common.min.css">
+    <link rel="stylesheet" href="https://kendo.cdn.telerik.com/2020.1.114/styles/kendo.common-material.min.css">
+    <link rel="stylesheet" href="https://kendo.cdn.telerik.com/2020.1.114/styles/kendo.material.min.css">
+    
+    <script src="https://code.jquery.com/jquery-3.3.1.min.js" integrity="sha256-FgpCb/KJQlLNfOu91ta32o/NMZxltwRo8QtmkMRdAu8=" crossorigin="anonymous"></script>
+    <script src="https://kendo.cdn.telerik.com/2020.1.114/js/kendo.all.min.js"></script>
+    <script src="https://kendo.cdn.telerik.com/2020.1.114/js/jszip.min.js"></script>
+
+    <style>
+        body {
+            font-family: Arial, Helvetica, sans-serif;
+            font-size: 14px;
+        }
+        .k-autocomplete .k-input, .k-textbox>input {
+            display: block;
+            width: 300px;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="message"></div>
+
+    <div id="toolbar"></div>
+    <br />
+    <div id="grid" style="min-width: 100%;"></div>
+
+    <script>
+        (function (vaApp,$,undefined) {
+            // App base URLs
+            var baseurl = "https://vaww.v3apps.v03.med.va.gov/phonebookwebapi"
+    
+            // Default VISN & VAMC
+            vaApp.visn = 'visn3';
+            vaApp.location = '';
+
+            // Fetch the body element from DOM
+            var _body = $('body');
+
+            // Search By datasources - VISN-Wide only sees the Name search option
+            var searchVAMCDS = [ { value: 'Name'}, { value: 'Service' }, { value: 'Title' }, { value: 'Phone' }, {value: 'Get All Staff' } ];
+            var searchVISNDS = [ { value: 'Name'} ];
+
+            // Setup DOM with Kendo widgets
+            vaApp.init = function() {
+                // VISN 3 VAMC info
+                var vamcDS = new kendo.data.DataSource({
+                    data: [
+                            { text: 'Bronx', value: 'bronx (brx)', visn: 'visn3' },
+                            { text: 'Hudson Valley', value: 'hudson valley (hvh)', visn: 'visn3' },
+                            { text: 'New Jersey', value: 'new jersey (njh)', visn: 'visn3' },
+                            { text: 'New York Harbor', value: 'new york harbor (nyh)', visn: 'visn3' },
+                            { text: 'Northport', value: 'northport (nop)', visn: 'visn3' },
+                            { text: 'VISN 3', value: 'visn 03 (v03)', visn: 'visn3' },
+                            { text: 'VISN-Wide', value: ' ', visn: 'visn3' }
+                    ]
+                });
+        
+                // Toolbar
+                _body.find('#toolbar').kendoToolBar({
+                    resizable: false,
+                    items: [
+                        { template: '<label>Location:</label><input id="vamc" />'},
+                        { type: "separator" },
+                        { template: '<label>Search By:</label><input id="searchby" />'},
+                        { type: "separator" },
+                        { template: '<div id="Name"><label>Last Name:</label><input id="lastname" type="text" class="k-textbox" />&nbsp;&nbsp;<label>First Name:</label><input id="firstname" type="text" class="k-textbox" />&nbsp;&nbsp;<button id="namesearch" class="k-button k-primary">Search</button></div>' },
+                        { template: '<div id="Title"><label>Title:</label><input id="actitle" type="text" style="width: 300px;" /></div>' },
+                        { template: '<div id="Service"><label>Service:</label><input id="acservice" type="text" style="width: 300px;" /></div>' },
+                        { template: '<div id="Phone"><label>Phone:</label><input id="telephone" type="text" class="k-textbox" /><button id="phonesearch" class="k-button k-primary">Search</button></div>' }
+                    ]
+                });
+
+                // Location Dropdown
+                _body.find('#vamc').kendoDropDownList({
+                    dataTextField: 'text',
+                    dataValueField: 'value',
+                    dataSource: vamcDS,
+                    index: 0,
+                    change: onVAMCChange
+                });
+
+                // Set default locations dropdown
+                _body.find('#vamc').data("kendoDropDownList").select(function(dataItem) {
+                    return dataItem.value === vaApp.location;
+                });
+
+                // Search By Dropdown
+                _body.find('#searchby').kendoDropDownList({
+                    dataTextField: 'value',
+                    dataValueField: 'value',
+                    dataSource: [],
+                    index: 0,
+                    change: onSearchByChange
+                });
+
+                // Render autocomplete
+                _body.find('#actitle').kendoAutoComplete({
+                    autoWidth: true,
+                    clearButton: false,
+                    dataSource: [],
+                    filter: "contains",
+                    placeholder: "Enter a title...",
+                    change: onTitleChange
+                });
+
+                _body.find('#acservice').kendoAutoComplete({
+                    autoWidth: true,
+                    clearButton: false,
+                    dataSource: [],
+                    filter: "contains",
+                    placeholder: "Enter a service...",
+                    change: onServiceChange
+                });
+
+                // Render kendo grid
+                _body.find('#grid').kendoGrid({
+                    toolbar: ['pdf','excel'],
+                    dataSource: [],
+                    height: 600,
+                    width: 800,
+                    scrollable: true,
+                    columnMenu: true,
+                    filterable: true,
+                    sortable: true,
+                    pageable: {
+                        pageSize: 25,
+                        buttonCount: 3,
+                        pageSizes: [25, 50, 'all'],
+                        messages: {
+                            display: 'Showing {0}-{1} from {2} employees',
+                            empty: 'No employees found.',
+                            itemsPerPage: 'employees per page'
+                        }
+                    },
+                    columns: [
+                        { field: 'CN', title: 'Name' },
+                        { field: 'title', title: 'Title', template: '#= title #' },
+                        { field: 'description', title: 'Service', template: '#= description #' },
+                        { field: 'telephoneNumber', title: 'Phone', template: '#= telephoneNumber #' },
+                        { field: 'mobile', title: 'Mobile/Pager', template: '#= mobile + "<br />" + pager #' },
+                        { field: 'l', title: 'Location', hidden: true, template: '#= l #' },
+                        { field: 'mail', title: 'E-Mail/Lync', template: '#= "<a href=\'mailto:" + mail + "\' title=\'Send mail to " + CN + "\'>" + mail + "</a><br /><a href=\'sip:" + mail + "\' title=\'Communicate via Microsoft Lync with " + CN + "\'>Chat via LYNC</a>" #' },
+                        { field: 'facsimileTelephoneNumber',  title: 'Fax', hidden: true },
+                        { field: 'info', hidden: true, template: '#= info #' },
+                        { field: 'ipPhone', hidden: true },
+                        { field: 'physicalDeliveryOfficeName', title: 'VAMC', hidden: true, template: '#= physicalDeliveryOfficeName #' },
+                        { field: 'streetAddress', title: 'Address', hidden: true, template: '#= streetAddress #' }
+                    ]
+                });
+
+                // Attached events to DOM elements
+                _body.find('#namesearch').on('click', function (e) {
+                    e.preventDefault();
+
+                    var inputs = _body.find('#Name').children('input');
+                    var tempStr = '';
+                    $.each(inputs, function (idx, val) {
+                        tempStr += $(val)[0].value;
+                        if (idx == 0) tempStr += '|';
+                        $(val)[0].value = '';   // clears values after search
+                    });
+
+                    // New search url
+                    var staffSearch = baseurl;
+                    if (_body.find('#vamc').data("kendoDropDownList").dataItem().value !== ' ') staffSearch += '/search/' + vaApp.visn + '/' + vaApp.location + '/name/' + tempStr;
+                    else staffSearch += '/search/' + vaApp.visn + '/name/' + tempStr;
+
+                    // Get data and populate grid
+                    Lib.loadData(staffSearch, _body.find('#grid'));
+                });
+
+                _body.find('#phonesearch').on('click', function (e) {
+                    e.preventDefault();
+                    var input = _body.find('#Phone').children('input');
+
+                    // New search url
+                    var staffSearch = baseurl + '/search/' + vaApp.visn + '/' + vaApp.location + '/phone/' + input[0].value;
+
+                    // Get data and populate grid
+                    Lib.loadData(staffSearch, _body.find('#grid'));
+                    input[0].value = '';   // clears value after search
+                });
+
+                // Call render to update DOM
+                vaApp.render();
+            }
+
+            vaApp.render = function() {
+                // Hide all the toolbar controls
+                var elem = _body.find('#toolbar').data('kendoToolBar').element.find('div [id]');
+                $.each(elem, function (idx, val) {
+                    switch (val.id) {
+                        case 'Name':
+                        case 'Title':
+                        case 'Service':
+                        case 'Phone':
+                            $(val).hide();
+                            break;
+                    }
+                });
+
+                // Change datasource based on whether the search is VISN-Wide or local to the VAMC
+                if (_body.find('#vamc').data("kendoDropDownList").dataItem().value !== ' ') _body.find('#searchby').data("kendoDropDownList").setDataSource(searchVAMCDS);
+                else _body.find('#searchby').data("kendoDropDownList").setDataSource(searchVISNDS);
+
+                // Set default search by option and show Name
+                _body.find('#searchby').data("kendoDropDownList").select(function(dataItem) {
+                    return dataItem.value === 'Name';
+                });
+                $('#Name').show();
+
+                // Default search url
+                var staffSearch = baseurl;
+                if (_body.find('#vamc').data("kendoDropDownList").dataItem().value !== ' ') staffSearch += '/search/' + vaApp.visn + '/' + vaApp.location + '/name/a|a';
+                else staffSearch += '/search/' + vaApp.visn + '/name/a|a';
+                var autoComplete = baseurl + '/autocomplete/' + vaApp.visn + '/' + vaApp.location;
+
+                // Get data and populate grid
+                if (_body.find('#vamc').data("kendoDropDownList").dataItem().value !== ' ') Lib.loadFilters(autoComplete, staffSearch, _body.find('#actitle'), _body.find('#acservice'), _body.find('#grid'));
+                else Lib.loadData(staffSearch, _body.find('#grid'));
+            };
+    
+            Lib = {
+                // Returns a kendo datasource object
+                jqAjax: function(callback,url) {
+                    $.ajax({
+                        url: url,
+                        type: 'GET',
+                        async: true,
+                        beforeSend: function (req) {
+                            req.setRequestHeader("Accept", "application/json;odata=verbose");
+                        },
+                        success: function (data) {
+                            callback(new kendo.data.DataSource({ data: data.Data, pageSize: 25 }));
+                        },
+                        error: function (xhr) {
+                            _body.find('#message').append('<p style="color: #dc3545;">Error connecting to Active Directory</p>');
+                            callback(xhr);
+                        }
+                    })
+                },
+                loadData: function (url, grid) {
+                    // Show message while loading data
+                    _body.find('#message').empty();
+                    _body.find('#message').append('<p style="color: #007bff;">Please wait, getting the information from Active Directory now...</p>');
+                    kendo.ui.progress(grid, true);
+
+                    // Render grid and populate it with data
+                    Lib.jqAjax(function (datasource) {
+                        //console.log(datasource);
+
+                        grid.data('kendoGrid').setDataSource(datasource);
+                        grid.data('kendoGrid').refresh();
+                        kendo.ui.progress(grid, false);
+                        _body.find('#message').empty();
+
+                        // Show physicalDeliveryOfficeName if VISN-Wide search
+                        if (_body.find('#vamc').data("kendoDropDownList").dataItem().value === ' ') grid.data('kendoGrid').showColumn('physicalDeliveryOfficeName');
+                        else grid.data('kendoGrid').hideColumn('physicalDeliveryOfficeName');
+                    }, url);
+                },
+                loadFilters: function(url1, url2, acTitle, acService, grid) {
+                    // Show message while loading data
+                    //_body.find('#message').empty();
+                    _body.find('#message').append('<p style="color: #007bff;">Please wait, getting the information from Active Directory now...</p>');
+                    kendo.ui.progress(grid, true);
+
+                    Lib.jqAjax(function(data) {
+                        //console.log(acTitle, acService, data.options.data);
+                        // Loads AutoComplete widgets with VAMC specific data
+                        acTitle.data("kendoAutoComplete").setDataSource(data.options.data.title);
+                        acService.data("kendoAutoComplete").setDataSource(data.options.data.service);
+                        Lib.loadData(url2, grid);
+                    }, url1);
+                }
+            };
+
+            vaApp.Util = {
+                getVAMC: function() {
+                    switch (window.location.pathname.split('/')[2].substring(3,6).toLowerCase()) {
+                        case 'brx':
+                            vaApp.location = 'bronx (brx)';
+                            break;
+                        case 'njh':
+                            vaApp.location = 'new jersey (njh)';
+                            break;
+                        case 'hvh':
+                            vaApp.location = 'hudson valley (hvh)';
+                            break;
+                        case 'nop':
+                            vaApp.location = 'northport (nop)';
+                            break;
+                        case 'nyh':
+                            vaApp.location = 'new york harbor (nyh)';
+                            break;
+                        default:
+                            vaApp.location = '';
+                    }
+
+                    // Render Kendo widgets
+                    vaApp.init();
+                },
+                error: function (xhr) {
+                    console.log("Error on retrieving current user.");
+                }
+            }
+
+            function onVAMCChange() {
+                // show only the selected option
+                vaApp.location = _body.find('#vamc').data("kendoDropDownList").dataItem().value;
+                vaApp.visn = _body.find('#vamc').data("kendoDropDownList").dataItem().visn;
+
+                vaApp.render();
+            }
+
+            function onSearchByChange() {
+                // hide all the options
+                var elem = _body.find('#toolbar').data('kendoToolBar').element.find('div [id]');
+                $.each(elem, function (idx, val) {
+                    switch (val.id) {
+                        case 'Name':
+                        case 'Title':
+                        case 'Service':
+                        case 'Phone':
+                            $(val).hide();
+                            break;
+                    }
+                })
+
+                // show only the selected option
+                var selectedVal = _body.find('#searchby').data("kendoDropDownList").value();
+                $('#' + selectedVal).show();
+
+                // This will get all staff information for that VAMC
+                if (selectedVal == 'Get All Staff') {
+                    var staffSearch = baseurl + '/search/' + vaApp.visn + '/' + vaApp.location + '/name/all';
+                    Lib.loadData(staffSearch, _body.find('#grid'));
+                }
+            }
+
+            function onTitleChange(e) {
+                var title = _body.find('#actitle').data("kendoAutoComplete").value();
+
+                var staffSearch = baseurl + '/search/' + vaApp.visn + '/' + vaApp.location + '/title/' + title;
+                Lib.loadData(staffSearch, _body.find('#grid'));
+
+                // Clears last searched value
+                _body.find('#actitle').data("kendoAutoComplete").value('');
+                e.preventDefault();
+            }
+
+            function onServiceChange(e) {
+                var service = _body.find('#acservice').data("kendoAutoComplete").value();
+
+                var staffSearch = baseurl + '/search/' + vaApp.visn + '/' + vaApp.location + '/service/' + service;
+                Lib.loadData(staffSearch, _body.find('#grid'));
+
+                // Clears last searched value
+                _body.find('#acservice').data("kendoAutoComplete").value('');
+                e.preventDefault();
+            }
+        }(window.vaApp = window.vaApp || {},jQuery));
+    
+        $(function () {
+            // Get user info and init app
+            vaApp.Util.getVAMC();
+        });
+    </script>    
+</body>
+</html>
